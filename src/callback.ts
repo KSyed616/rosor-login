@@ -293,14 +293,22 @@ export async function completeAuthorization(
 
   const amr = Array.isArray(payload.amr) ? (payload.amr as string[]) : [];
 
-  // `sid` is read first only so a provider that starts sending one is not
-  // ignored. TeamDeck does not, which is what sessionReferenceUrl is for.
-  const sessionId =
-    typeof payload.sid === 'string'
+  /**
+   * THE REFERENCE WINS OVER `sid`, when one is configured.
+   *
+   * `sid` identifies the session at the PROVIDER; a reference is a handle
+   * issued to THIS client for it. They are not interchangeable, and §3.5's
+   * check only accepts the second — sending a `sid` to it resolves nothing and
+   * every check would report the session gone.
+   *
+   * `sid` is still the fallback, for a provider that has no reference endpoint
+   * and accepts its own session id at the check.
+   */
+  const sessionId = config.sessionReferenceUrl
+    ? await fetchSessionReference(config, tokens.id_token!, fetchImpl)
+    : typeof payload.sid === 'string'
       ? payload.sid
-      : config.sessionReferenceUrl
-        ? await fetchSessionReference(config, tokens.id_token!, fetchImpl)
-        : undefined;
+      : undefined;
 
   return {
     subject: payload.sub,

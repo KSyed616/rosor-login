@@ -336,16 +336,32 @@ describe('the session reference (§3.5)', () => {
     ).rejects.toMatchObject({ code: 'session_ended' });
   });
 
-  it('prefers a `sid` claim when a provider does send one', async () => {
+  /**
+   * `sid` is the session's id AT THE PROVIDER; a reference is a handle issued
+   * to this client for it. §3.5's check only accepts the second, so a `sid`
+   * used in its place resolves nothing and every check reports the session
+   * gone — which is how this was found.
+   */
+  it('still fetches a reference when the token also carries a sid', async () => {
     const c = configured();
     const pending = await c.begin();
-    provider.nextIdToken = await provider.mintIdToken({ nonce: pending.nonce, sid: 'from-the-token' });
+    provider.nextIdToken = await provider.mintIdToken({ nonce: pending.nonce, sid: 'provider-session-id' });
 
     const user = await c.complete({ code: 'c', state: pending.state, expected: pending });
 
-    expect(user.sessionId).toBe('from-the-token');
-    // And it did not go asking for a reference it did not need.
-    expect(provider.calls.some((u) => u.endsWith('/internal/session-reference'))).toBe(false);
+    expect(user.sessionId).toBe('a-per-client-session-reference');
+    expect(user.sessionId).not.toBe('provider-session-id');
+  });
+
+  /** With no reference endpoint, `sid` is the only thing left to use. */
+  it('falls back to sid when no reference endpoint is configured', async () => {
+    const c = client();
+    const pending = await c.begin();
+    provider.nextIdToken = await provider.mintIdToken({ nonce: pending.nonce, sid: 'provider-session-id' });
+
+    const user = await c.complete({ code: 'c', state: pending.state, expected: pending });
+
+    expect(user.sessionId).toBe('provider-session-id');
   });
 
   it('sends raw Basic credentials, as the provider parses them', async () => {
