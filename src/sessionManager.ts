@@ -75,6 +75,43 @@ export interface SessionManager {
   start(user: SignedInUser, options?: { higherRisk?: boolean }): Promise<StartedSession>;
 
   /**
+   * Replace a session after a step-up, when the person has signed in again
+   * (§8.3, §8.1).
+   *
+   * §8.3: "a new identifier is issued on every authentication AND
+   * re-authentication". §8.1: "successful re-authentication resets both
+   * timers". So this is NOT a field update on the existing record — the
+   * identifier rotates, the old record is deleted, and a new cookie is issued.
+   *
+   * WHY ROTATION MATTERS, given it is the same person who already had a
+   * session. Whatever prompted the step-up was a sensitive action, and the
+   * identifier that existed before it is the one that may have leaked — a
+   * shared machine, a proxy log, a copied URL. Carrying it forward would leave
+   * the credential guarding the sensitive path the one already in circulation.
+   * Rotation is cheap and makes the question moot.
+   *
+   * THE CSRF TOKEN ROTATES WITH IT, necessarily: §8.4 binds it to the session,
+   * so a page still holding the old one fails every write afterwards. The
+   * obvious "fix" for that — carrying the old token forward — is session
+   * fixation. The caller hands the new one to the page, exactly as after
+   * `start`.
+   *
+   * WHAT CARRIES FORWARD is deliberately almost nothing: `higherRisk`, which
+   * classifies the account rather than the session. `authTime` comes from the
+   * new token, which is the whole point — an old one would leave the session
+   * failing the freshness check it just passed.
+   *
+   * THE OLD SESSION SURVIVES A FAILED STEP-UP. This is only reachable with a
+   * verified SignedInUser, so a provider error, a cancelled passkey or a token
+   * that came back too old never arrives here and the existing session is
+   * untouched. A failed attempt to prove yourself must not sign you out.
+   */
+  reauthenticate(
+    previous: Pick<SessionRecord, 'idHash' | 'higherRisk'>,
+    user: SignedInUser,
+  ): Promise<StartedSession>;
+
+  /**
    * Resolve the cookie to a live session, applying both timeouts.
    *
    * An expired session is DELETED as it is read. Leaving it would mean a
@@ -148,6 +185,16 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
         csrfToken: record.csrfToken,
         session: record,
       };
+    },
+
+    async reauthenticate(previous, user): Promise<StartedSession> {
+      // Mint FIRST, delete second. If the store fails between the two, the
+      // person is left with two working sessions rather than none — untidy,
+      // and both expire on their own. The other order leaves someone who just
+      // proved who they are with nothing.
+      const started = await this.start(user, { higherRisk: previous.higherRisk });
+      await store.delete(previous.idHash);
+      return started;
     },
 
     async read(cookieHeader, now = new Date()): Promise<SessionLookup> {

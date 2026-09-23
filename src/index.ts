@@ -83,6 +83,17 @@ export {
 } from './activity.js';
 
 export { checkSession } from './sessionCheck.js';
+
+// Freshness for sensitive actions (§8.1) and method changes (§6.2).
+export {
+  SENSITIVE_ACTION_SECONDS,
+  METHOD_CHANGE_SECONDS,
+  isFreshEnough,
+  ageOfAuthentication,
+  checkFreshness,
+  stepUp,
+} from './freshness.js';
+export type { FreshnessVerdict } from './freshness.js';
 export type { SessionCheckInput, SessionCheckResult, SessionStatus } from './sessionCheck.js';
 export { checkIsDue, SESSION_CHECK_INTERVAL_MS } from './session.js';
 
