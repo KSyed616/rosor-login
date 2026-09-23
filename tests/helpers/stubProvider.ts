@@ -25,6 +25,8 @@ export interface MintOptions {
   expiresIn?: string;
   includeAuthTime?: boolean;
   amr?: string[];
+  /** Only for the case where a provider DOES send one. */
+  sid?: string;
 }
 
 export interface StubProvider {
@@ -38,6 +40,8 @@ export interface StubProvider {
   failNextTokenRequest(error: string, status?: number): void;
   /** What discovery reports as its issuer; changing it simulates a mix-up. */
   discoveryIssuer: string;
+  /** Makes the session-reference endpoint refuse. */
+  referenceFailure: boolean;
   nextIdToken: string | null;
 }
 
@@ -55,6 +59,7 @@ export async function createStubProvider(): Promise<StubProvider> {
   const state = {
     discoveryIssuer: ISSUER,
     nextIdToken: null as string | null,
+    referenceFailure: false,
   };
 
   async function mintIdToken(options: MintOptions = {}): Promise<string> {
@@ -64,7 +69,15 @@ export async function createStubProvider(): Promise<StubProvider> {
       email: 'ada.lovelace@rosor.ca',
       name: 'Ada Lovelace',
       amr: options.amr ?? ['pwd', 'otp'],
-      sid: 'identity-session-1',
+      /**
+       * NO `sid` BY DEFAULT, because TeamDeck emits none.
+       *
+       * This stub used to include one unconditionally, which made every test
+       * see a sessionId that no real sign-in produces — and hid the fact that
+       * nothing fetched a reference instead. A stub that is kinder than the
+       * provider proves the wrong thing.
+       */
+      ...(options.sid ? { sid: options.sid } : {}),
       ...(options.includeAuthTime === false ? {} : { auth_time: options.authTime ?? now }),
     })
       .setProtectedHeader({ alg: 'EdDSA', kid })
@@ -117,6 +130,11 @@ export async function createStubProvider(): Promise<StubProvider> {
       return json({ keys: [publicJwk] });
     }
 
+    if (url.endsWith('/internal/session-reference')) {
+      if (state.referenceFailure) return json({ error: 'session_ended' }, 409);
+      return json({ reference: 'a-per-client-session-reference' });
+    }
+
     if (url.endsWith('/oidc/token')) {
       if (tokenFailure) {
         const failure = tokenFailure;
@@ -146,6 +164,12 @@ export async function createStubProvider(): Promise<StubProvider> {
     },
     set discoveryIssuer(value: string) {
       state.discoveryIssuer = value;
+    },
+    get referenceFailure() {
+      return state.referenceFailure;
+    },
+    set referenceFailure(value: boolean) {
+      state.referenceFailure = value;
     },
     get nextIdToken() {
       return state.nextIdToken;

@@ -70,6 +70,19 @@ export interface RosorLoginConfig {
   sessionCheckUrl?: string;
 
   /**
+   * The provider's `/internal/session-reference`, on `rosor_internal` (§3.5).
+   *
+   * WITHOUT IT, §3.5 CANNOT RUN AT ALL. The session check identifies a session
+   * by a reference the provider issues to this client; the ID token carries no
+   * `sid` and never has. So a session created without this has
+   * `sessionId: undefined`, and the first check that falls due throws
+   * `no_session_reference` — five minutes after every sign-in.
+   *
+   * A sibling of the OIDC mount, like `sessionCheckUrl`, so neither is derived.
+   */
+  sessionReferenceUrl?: string;
+
+  /**
    * Seconds of tolerance for clock skew when checking `exp` and `iat`.
    * Deliberately small: these are 5-minute tokens (§3.4), and a generous
    * tolerance on a short-lived token is most of its lifetime.
@@ -78,9 +91,12 @@ export interface RosorLoginConfig {
 }
 
 export interface ResolvedConfig
-  extends Required<Omit<RosorLoginConfig, 'internalIssuer' | 'sessionCheckUrl'>> {
+  extends Required<
+    Omit<RosorLoginConfig, 'internalIssuer' | 'sessionCheckUrl' | 'sessionReferenceUrl'>
+  > {
   internalIssuer: string;
   sessionCheckUrl?: string;
+  sessionReferenceUrl?: string;
 }
 
 export class RosorLoginConfigError extends Error {
@@ -132,11 +148,14 @@ export function resolveConfig(config: RosorLoginConfig): ResolvedConfig {
   const withOpenId = scope.split(/\s+/).includes('openid') ? scope : `openid ${scope}`;
 
   if (config.sessionCheckUrl) requireAbsoluteUrl('sessionCheckUrl', config.sessionCheckUrl);
+  if (config.sessionReferenceUrl)
+    requireAbsoluteUrl('sessionReferenceUrl', config.sessionReferenceUrl);
 
   return {
     issuer,
     internalIssuer,
     sessionCheckUrl: config.sessionCheckUrl?.replace(/\/+$/, ''),
+    sessionReferenceUrl: config.sessionReferenceUrl?.replace(/\/+$/, ''),
     clientId: config.clientId,
     clientSecret: config.clientSecret,
     redirectUri: config.redirectUri,

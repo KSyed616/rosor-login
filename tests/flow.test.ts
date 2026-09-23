@@ -118,7 +118,9 @@ describe('finishing a sign-in', () => {
     expect(user.subject).toBe('account-1');
     expect(user.email).toBe('ada.lovelace@rosor.ca');
     expect(user.methods).toEqual(['pwd', 'otp']);
-    expect(user.sessionId).toBe('identity-session-1');
+    // No sessionId: the provider sends no `sid` and no reference endpoint is
+    // configured here. See "the session reference" below.
+    expect(user.sessionId).toBeUndefined();
     expect(user.authTime).toBeInstanceOf(Date);
   });
 
@@ -268,6 +270,91 @@ describe('what it refuses', () => {
     await expect(
       c.complete({ code: 'a-spent-code', state: pending.state, expected: pending }),
     ).rejects.toMatchObject({ code: 'invalid_grant' });
+  });
+});
+
+/**
+ * The session reference — §3.5.
+ *
+ * These exist because their absence shipped. `sessionId` came only from a
+ * `sid` claim, TeamDeck emits none, and nothing fetched a reference instead.
+ * Every session was therefore created with `sessionId: undefined`, and the
+ * first check to fall due threw `no_session_reference` — five minutes after
+ * sign-in, so every test passed and every real sign-in broke.
+ *
+ * The first case below is the one that would have caught it.
+ */
+describe('the session reference (§3.5)', () => {
+  function configured() {
+    return createLoginClient(
+      {
+        issuer: ISSUER,
+        internalIssuer: INTERNAL_ISSUER,
+        sessionReferenceUrl: `${INTERNAL_ISSUER}/internal/session-reference`,
+        clientId: CLIENT_ID,
+        clientSecret: CLIENT_SECRET,
+        redirectUri: REDIRECT_URI,
+      },
+      provider.fetch,
+    );
+  }
+
+  it('gives a session a reference §3.5 can be performed with', async () => {
+    const c = configured();
+    const pending = await c.begin();
+    provider.nextIdToken = await provider.mintIdToken({ nonce: pending.nonce });
+
+    const user = await c.complete({ code: 'c', state: pending.state, expected: pending });
+
+    expect(user.sessionId).toBe('a-per-client-session-reference');
+  });
+
+  /** The shape that shipped: no reference configured, so none obtained. */
+  it('leaves sessionId undefined when no reference endpoint is configured', async () => {
+    const c = client();
+    const pending = await c.begin();
+    provider.nextIdToken = await provider.mintIdToken({ nonce: pending.nonce });
+
+    const user = await c.complete({ code: 'c', state: pending.state, expected: pending });
+
+    expect(user.sessionId).toBeUndefined();
+  });
+
+  /**
+   * Failing the sign-in is the point. A session that cannot be checked is one
+   * §3.5 does not govern: it works for five minutes and then throws, so the
+   * person is signed out by a crash rather than by a decision.
+   */
+  it('fails the sign-in when the provider will not issue one', async () => {
+    const c = configured();
+    const pending = await c.begin();
+    provider.nextIdToken = await provider.mintIdToken({ nonce: pending.nonce });
+    provider.referenceFailure = true;
+
+    await expect(
+      c.complete({ code: 'c', state: pending.state, expected: pending }),
+    ).rejects.toMatchObject({ code: 'session_ended' });
+  });
+
+  it('prefers a `sid` claim when a provider does send one', async () => {
+    const c = configured();
+    const pending = await c.begin();
+    provider.nextIdToken = await provider.mintIdToken({ nonce: pending.nonce, sid: 'from-the-token' });
+
+    const user = await c.complete({ code: 'c', state: pending.state, expected: pending });
+
+    expect(user.sessionId).toBe('from-the-token');
+    // And it did not go asking for a reference it did not need.
+    expect(provider.calls.some((u) => u.endsWith('/internal/session-reference'))).toBe(false);
+  });
+
+  it('sends raw Basic credentials, as the provider parses them', async () => {
+    const c = configured();
+    const pending = await c.begin();
+    provider.nextIdToken = await provider.mintIdToken({ nonce: pending.nonce });
+    await c.complete({ code: 'c', state: pending.state, expected: pending });
+
+    expect(provider.calls.some((u) => u.endsWith('/internal/session-reference'))).toBe(true);
   });
 });
 

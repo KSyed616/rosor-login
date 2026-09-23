@@ -150,6 +150,68 @@ function jwksFor(uri: string, fetchImpl: typeof fetch): KeyResolver {
   return resolver;
 }
 
+/**
+ * Exchange the ID token for a handle §3.5 can be performed with.
+ *
+ * The session check identifies a session by a reference the provider issues to
+ * THIS client. The ID token carries no `sid` — it never has — so without this
+ * call `sessionId` is undefined, and the first check that falls due throws
+ * `no_session_reference`. That is five minutes after every sign-in, which is
+ * long enough for tests to pass and short enough to break in front of a user.
+ *
+ * RAW BASIC CREDENTIALS, not form-encoded: the provider splits the decoded
+ * string on the first colon and compares bytes, as it does at the session
+ * check. The token endpoint is the odd one out, not these.
+ *
+ * A FAILURE HERE FAILS THE SIGN-IN. Returning a session that cannot be checked
+ * would be a session §3.5 does not govern — it would work for five minutes and
+ * then throw, and the person would be signed out by a crash rather than a
+ * decision. If the deployment configured this, it meant §3.5 to run.
+ */
+async function fetchSessionReference(
+  config: ResolvedConfig,
+  idToken: string,
+  fetchImpl: typeof fetch,
+): Promise<string> {
+  const credentials = Buffer.from(`${config.clientId}:${config.clientSecret}`).toString('base64');
+
+  let response: Response;
+  try {
+    response = await fetchImpl(config.sessionReferenceUrl!, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        Authorization: `Basic ${credentials}`,
+      },
+      body: JSON.stringify({ idToken }),
+    });
+  } catch (error) {
+    throw new RosorLoginProviderError(
+      `Could not reach the session reference endpoint at ${config.sessionReferenceUrl}: ` +
+        (error as Error).message,
+    );
+  }
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new RosorLoginError(
+      body.error ?? 'session_reference_refused',
+      `The provider refused to issue a session reference (HTTP ${response.status}` +
+        (body.error ? `, ${body.error}` : '') + ').',
+    );
+  }
+
+  const body = (await response.json().catch(() => ({}))) as { reference?: string };
+  if (typeof body.reference !== 'string' || body.reference.length === 0) {
+    throw new RosorLoginError(
+      'session_reference_missing',
+      'The provider answered the session reference request without a reference.',
+    );
+  }
+  return body.reference;
+}
+
 export async function completeAuthorization(
   config: ResolvedConfig,
   input: CallbackInput,
@@ -231,13 +293,22 @@ export async function completeAuthorization(
 
   const amr = Array.isArray(payload.amr) ? (payload.amr as string[]) : [];
 
+  // `sid` is read first only so a provider that starts sending one is not
+  // ignored. TeamDeck does not, which is what sessionReferenceUrl is for.
+  const sessionId =
+    typeof payload.sid === 'string'
+      ? payload.sid
+      : config.sessionReferenceUrl
+        ? await fetchSessionReference(config, tokens.id_token!, fetchImpl)
+        : undefined;
+
   return {
     subject: payload.sub,
     email: typeof payload.email === 'string' ? payload.email : undefined,
     name: typeof payload.name === 'string' ? payload.name : undefined,
     authTime: new Date(payload.auth_time * 1000),
     methods: amr,
-    sessionId: typeof payload.sid === 'string' ? payload.sid : undefined,
+    sessionId,
     claims: payload,
   };
 }

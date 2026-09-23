@@ -1,7 +1,7 @@
 {
   "name": "@rosor/login",
-  "version": "0.4.0",
-  "description": "The relying-party half of Rosor sign-in — authentication standard v0.9, §3.4, §3.5, §8",
+  "version": "0.6.0",
+  "description": "The relying-party half of Rosor sign-in \u2014 authentication standard v0.9, \u00a73.4, \u00a73.5, \u00a78",
   "license": "UNLICENSED",
   "private": true,
   "type": "module",
