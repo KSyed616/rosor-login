@@ -48,18 +48,33 @@ interface DiscoveryDocument {
   code_challenge_methods_supported?: string[];
 }
 
-/** Swap the public issuer prefix for the internal one. */
-function toInternal(url: string, config: ResolvedConfig): string {
-  if (config.internalIssuer === config.issuer) return url;
-  if (!url.startsWith(config.issuer)) {
-    // The provider published an endpoint outside its own issuer. Rebasing
-    // blindly would send the client secret somewhere unrelated.
-    throw new RosorLoginProviderError(
-      `The provider published ${url}, which is not under its issuer ${config.issuer}. ` +
-        'Refusing to guess its address on the internal network.',
-    );
+/**
+ * Move an endpoint onto the base that suits its purpose.
+ *
+ * A published endpoint may arrive on EITHER base, and which one depends on
+ * where discovery was fetched from rather than on anything about the endpoint.
+ * `oidc-provider` behind a proxy derives endpoint URLs from the host the
+ * request came in on, while `issuer` stays the configured constant — so
+ * reading discovery over the internal address returns internal endpoints, and
+ * reading it publicly returns public ones.
+ *
+ * Neither is wrong; both need normalising. The browser must be sent to the
+ * PUBLIC authorization endpoint whichever way discovery answered, and the code
+ * exchange and key fetches must go over the INTERNAL one (§3.4).
+ *
+ * An endpoint under neither base is still refused. That is the case the guard
+ * was written for: rebasing something unrelated would send the client secret
+ * to wherever a provider happened to name.
+ */
+function rebase(url: string, config: ResolvedConfig, onto: string): string {
+  for (const base of [config.issuer, config.internalIssuer]) {
+    if (url.startsWith(base)) return onto + url.slice(base.length);
   }
-  return config.internalIssuer + url.slice(config.issuer.length);
+  throw new RosorLoginProviderError(
+    `The provider published ${url}, which is under neither its issuer ` +
+      `${config.issuer} nor its internal address ${config.internalIssuer}. ` +
+      'Refusing to guess where it belongs.',
+  );
 }
 
 const cache = new Map<string, ProviderEndpoints>();
@@ -127,9 +142,11 @@ export async function discover(
 
   const endpoints: ProviderEndpoints = {
     issuer: document.issuer!,
-    authorizationEndpoint: document.authorization_endpoint!,
-    tokenEndpoint: toInternal(document.token_endpoint!, config),
-    jwksUri: toInternal(document.jwks_uri!, config),
+    // Public: a browser goes here, and it cannot reach rosor_internal.
+    authorizationEndpoint: rebase(document.authorization_endpoint!, config, config.issuer),
+    // Internal: the client secret and the key fetches go here (§3.4).
+    tokenEndpoint: rebase(document.token_endpoint!, config, config.internalIssuer),
+    jwksUri: rebase(document.jwks_uri!, config, config.internalIssuer),
   };
 
   cache.set(cacheKey, endpoints);
