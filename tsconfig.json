@@ -1,4 +1,15 @@
 {
+  // The editor's view, and what `npm run typecheck` uses. It checks the tests
+  // too, which the build configs deliberately do not — they emit, and a test
+  // has no business in dist.
+  //
+  // rootDir is widened to the repo and emit is off, because the inherited
+  // `rootDir: "src"` makes every test file an error (TS6059) rather than
+  // checking it. Nothing here produces output, so the widening costs nothing.
   "extends": "./tsconfig.esm.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "noEmit": true
+  },
   "include": ["src/**/*.ts", "tests/**/*.ts"]
 }

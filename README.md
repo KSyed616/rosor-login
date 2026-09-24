@@ -40,6 +40,11 @@ const login = createLoginClient({
   clientId: 'inventory',
   clientSecret: process.env.ROSOR_LOGIN_CLIENT_SECRET!,
   redirectUri: 'https://app.example.com/auth/callback',
+
+  // §3.5. Leave both out and sessions still expire on their own timers, but a
+  // revocation never reaches this application — see "What is not here yet".
+  sessionReferenceUrl: 'http://provider:3001/api/v1/auth-module/internal/session-reference',
+  sessionCheckUrl: 'http://provider:3001/api/v1/auth-module/internal/session-check',
 });
 ```
 
@@ -252,20 +257,24 @@ silently disables §3.5.
 - The browser-side heartbeat and the "Stay signed in" prompt (§8.1, §8.2)
 - Sign-out at the provider, as opposed to locally
 
-### And one thing that is not ours to fix
+### How §3.5 became reachable
 
-**The provider does not yet issue a session reference**, so `verify()` cannot
-be used end to end.
+For a while it was not. `/internal/session-check` identified a session by the
+identity session's own token — the value in the browser's `__Host-rosor_idp`
+cookie, which goes nowhere else. It is not on the OIDC interaction result and
+the ID token carries no `sid`, so no application could obtain what the endpoint
+required, and the one mechanism that carries a revocation outward could not be
+exercised by anyone. The endpoint's own tests passed, because they made a token
+directly.
 
-`/internal/session-check` identifies a session by the identity session's own
-token — it hashes what it is given and looks it up in `identitySession`. That
-token is set in the browser's `__Host-rosor_idp` cookie and goes nowhere else:
-it is not attached to the OIDC interaction result, and the ID token carries no
-`sid`. So an application has no way to obtain what the endpoint requires, and
-§3.5's mechanism — the only thing that carries a revocation outward — cannot
-be exercised by anyone.
+The provider now issues a per-client reference instead. Set
+**`sessionReferenceUrl`** and the library exchanges the ID token for one during
+the callback, on `rosor_internal`; `verify()` then works end to end.
 
-This library is built against the contract as written and will work unchanged
-once the provider hands out a reference at the code exchange. Until then,
-leave `sessionCheck` unconfigured: sessions still expire on their own timers,
+**Configure it, or §3.5 does not run.** Without `sessionReferenceUrl` a session
+is created with `sessionId: undefined`, and the first check that falls due
+throws `no_session_reference` — five minutes after every sign-in, which is long
+enough for tests to pass and short enough to break in front of somebody. If a
+deployment cannot use the internal channel, leave `sessionCheck` unconfigured
+as well and know what that costs: sessions still expire on their own timers,
 but "signed out everywhere" is not true.
