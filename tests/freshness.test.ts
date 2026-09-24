@@ -172,7 +172,7 @@ describe('re-authentication (§8.3, §8.1)', () => {
     // A cancelled passkey or a token that came back too old never produces a
     // SignedInUser, so reauthenticate is never called. A failed attempt to
     // prove yourself must not sign you out.
-    const still = await sessions.read(existing.cookie);
+    const still = await sessions.read(existing.cookie, NOW);
     expect(still.status).toBe('active');
     expect(await store.find(existing.session.idHash)).not.toBeNull();
   });
@@ -181,7 +181,7 @@ describe('re-authentication (§8.3, §8.1)', () => {
     const first = await signedIn({ authTime: minutesBefore(40) });
     const second = await sessions.reauthenticate(first.session, user());
 
-    const found = await sessions.read(second.cookie);
+    const found = await sessions.read(second.cookie, NOW);
     expect(found.status).toBe('active');
     if (found.status === 'active') {
       expect(found.session.idHash).toBe(second.session.idHash);
