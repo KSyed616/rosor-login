@@ -84,6 +84,8 @@ export {
 
 export { checkSession } from './sessionCheck.js';
 export { endIdentitySession } from './sessionEnd.js';
+export { listApplications } from './applications.js';
+export type { RosorApplication } from './applications.js';
 export type { SessionEndResult } from './sessionEnd.js';
 
 // Freshness for sensitive actions (§8.1) and method changes (§6.2).
@@ -108,6 +110,7 @@ import {
   type SessionCheckResult,
 } from './sessionCheck.js';
 import { endIdentitySession as performSessionEnd, type SessionEndResult } from './sessionEnd.js';
+import { listApplications as performListApplications, type RosorApplication } from './applications.js';
 
 export interface LoginClient {
   begin(options?: BeginOptions): Promise<PendingAuthorization>;
@@ -119,6 +122,12 @@ export interface LoginClient {
    * is the opposite of `checkSession`.
    */
   endIdentitySession(reference: string): Promise<SessionEndResult>;
+  /**
+   * §1's app library. Needs `applicationsUrl`; returns an empty list without
+   * it, because a launcher is a convenience and an empty grid is a smaller
+   * failure than an exception in whatever page was rendering it.
+   */
+  listApplications(reference: string): Promise<RosorApplication[]>;
 }
 
 /**
@@ -140,5 +149,6 @@ export function createLoginClient(
     complete: (input) => completeAuthorization(resolved, input, fetchImpl),
     checkSession: (input) => performSessionCheck(resolved, input, fetchImpl),
     endIdentitySession: (reference) => performSessionEnd(resolved, reference, fetchImpl),
+    listApplications: (reference) => performListApplications(resolved, reference, fetchImpl),
   };
 }

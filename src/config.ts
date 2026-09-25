@@ -100,6 +100,18 @@ export interface RosorLoginConfig {
   sessionEndUrl?: string;
 
   /**
+   * The provider's `/internal/applications`, on `rosor_internal` (§1).
+   *
+   * The app library. Unset means no launcher — the correct state for a
+   * deployment that has not configured one, and not an error: a grid of links
+   * is a convenience, and an application should start without it.
+   *
+   * A sibling of the OIDC mount, like the three above, and deliberately not
+   * derived from any of them.
+   */
+  applicationsUrl?: string;
+
+  /**
    * Seconds of tolerance for clock skew when checking `exp` and `iat`.
    * Deliberately small: these are 5-minute tokens (§3.4), and a generous
    * tolerance on a short-lived token is most of its lifetime.
@@ -111,13 +123,18 @@ export interface ResolvedConfig
   extends Required<
     Omit<
       RosorLoginConfig,
-      'internalIssuer' | 'sessionCheckUrl' | 'sessionReferenceUrl' | 'sessionEndUrl'
+      | 'internalIssuer'
+      | 'sessionCheckUrl'
+      | 'sessionReferenceUrl'
+      | 'sessionEndUrl'
+      | 'applicationsUrl'
     >
   > {
   internalIssuer: string;
   sessionCheckUrl?: string;
   sessionReferenceUrl?: string;
   sessionEndUrl?: string;
+  applicationsUrl?: string;
 }
 
 export class RosorLoginConfigError extends Error {
@@ -172,6 +189,7 @@ export function resolveConfig(config: RosorLoginConfig): ResolvedConfig {
   if (config.sessionReferenceUrl)
     requireAbsoluteUrl('sessionReferenceUrl', config.sessionReferenceUrl);
   if (config.sessionEndUrl) requireAbsoluteUrl('sessionEndUrl', config.sessionEndUrl);
+  if (config.applicationsUrl) requireAbsoluteUrl('applicationsUrl', config.applicationsUrl);
 
   return {
     issuer,
@@ -179,6 +197,7 @@ export function resolveConfig(config: RosorLoginConfig): ResolvedConfig {
     sessionCheckUrl: config.sessionCheckUrl?.replace(/\/+$/, ''),
     sessionReferenceUrl: config.sessionReferenceUrl?.replace(/\/+$/, ''),
     sessionEndUrl: config.sessionEndUrl?.replace(/\/+$/, ''),
+    applicationsUrl: config.applicationsUrl?.replace(/\/+$/, ''),
     clientId: config.clientId,
     clientSecret: config.clientSecret,
     redirectUri: config.redirectUri,
