@@ -83,6 +83,8 @@ export {
 } from './activity.js';
 
 export { checkSession } from './sessionCheck.js';
+export { endIdentitySession } from './sessionEnd.js';
+export type { SessionEndResult } from './sessionEnd.js';
 
 // Freshness for sensitive actions (§8.1) and method changes (§6.2).
 export {
@@ -105,12 +107,18 @@ import {
   type SessionCheckInput,
   type SessionCheckResult,
 } from './sessionCheck.js';
+import { endIdentitySession as performSessionEnd, type SessionEndResult } from './sessionEnd.js';
 
 export interface LoginClient {
   begin(options?: BeginOptions): Promise<PendingAuthorization>;
   complete(input: CallbackInput): Promise<SignedInUser>;
   /** §3.5. Needs `sessionCheckUrl`; throws naming it when absent. */
   checkSession(input: SessionCheckInput): Promise<SessionCheckResult>;
+  /**
+   * §8.6. Needs `sessionEndUrl`. Never throws — see sessionEnd.ts for why this
+   * is the opposite of `checkSession`.
+   */
+  endIdentitySession(reference: string): Promise<SessionEndResult>;
 }
 
 /**
@@ -131,5 +139,6 @@ export function createLoginClient(
     begin: (options) => beginAuthorization(resolved, options, fetchImpl),
     complete: (input) => completeAuthorization(resolved, input, fetchImpl),
     checkSession: (input) => performSessionCheck(resolved, input, fetchImpl),
+    endIdentitySession: (reference) => performSessionEnd(resolved, reference, fetchImpl),
   };
 }

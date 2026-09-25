@@ -45,6 +45,8 @@ const login = createLoginClient({
   // revocation never reaches this application — see "What is not here yet".
   sessionReferenceUrl: 'http://provider:3001/api/v1/auth-module/internal/session-reference',
   sessionCheckUrl: 'http://provider:3001/api/v1/auth-module/internal/session-check',
+  // §8.6. Leave it out and sign-out does not sign anybody out — see below.
+  sessionEndUrl: 'http://provider:3001/api/v1/auth-module/internal/session-end',
 });
 ```
 
@@ -246,6 +248,39 @@ It calls the provider only when due, unless you pass `force` — which §3.5
 requires before a sensitive action regardless of the timer. A session the
 provider no longer recognises is deleted locally, which is the entire point.
 
+## Signing out (§8.6)
+
+§8.6: "**Sign out**, visible in every application's header — Ends the identity
+session for this browser **and** every application session derived from it."
+
+Both halves. `end()` does the second by itself; it does the first only when the
+session manager is given a way to tell the provider:
+
+```ts
+const sessions = createSessionManager({
+  appName: 'inventory',
+  store,
+  sessionCheck: { check: (input) => login.checkSession(input) },
+  endIdentitySession: (reference) => login.endIdentitySession(reference),
+});
+```
+
+**Leave it out and sign-out does not sign anybody out.** The application's
+cookie clears, so the page looks right — and the identity session survives with
+its grant still saved, so the next authorization request issues a code with no
+interaction. The person presses sign out, presses sign in, and is returned to
+the session they just left having proved nothing. It reads as a broken button
+rather than a rule that was never implemented, which is why it went unnoticed
+in three consumers at once.
+
+Other applications learn about it through §3.5's check, within five minutes.
+That is the mechanism the standard specifies, and it is why the check exists.
+
+`endIdentitySession` never throws. By the time it runs this browser's session
+is already gone, so a provider that cannot be reached must not be reported as a
+failed sign-out — the identity session simply outlives it until its own timers
+end it.
+
 **When it cannot confirm, it refuses rather than guessing.** A session with no
 provider reference throws `no_session_reference`; an unreachable provider
 throws too. Both tempting readings are wrong: "cannot confirm, so end it" signs
@@ -255,7 +290,10 @@ silently disables §3.5.
 ## What is not here yet
 
 - The browser-side heartbeat and the "Stay signed in" prompt (§8.1, §8.2)
-- Sign-out at the provider, as opposed to locally
+- RP-initiated logout (`end_session_endpoint`). Sign-out reaches the provider
+  through `endIdentitySession` instead, which needs no stored `id_token_hint`
+  and no confirmation page — but a non-Rosor provider would want the standard
+  one.
 
 ### How §3.5 became reachable
 

@@ -294,6 +294,91 @@ describe('ending a session', () => {
 
     expect(store.size).toBe(1);
   });
+
+  /**
+   * §8.6: "Sign out … Ends the identity session for this browser and every
+   * application session derived from it."
+   *
+   * Ending only the application's own session is a sign-out that does not sign
+   * anybody out — the identity session survives, the grant is still saved, and
+   * the next authorization request issues a code with no interaction. Observed
+   * in TeamDeck on 25 September 2026, in code that had been copied from the
+   * same wrong assumption into every consumer.
+   */
+  it('tells the provider to end the identity session (§8.6)', async () => {
+    const ended: string[] = [];
+    sessions = createSessionManager({
+      store,
+      appName: 'inventory',
+      endIdentitySession: async (reference) => {
+        ended.push(reference);
+      },
+    });
+
+    const started = await sessions.start(signedIn());
+    await sessions.end(asRequestCookie(started.cookie));
+
+    expect(ended).toEqual(['identity-session-1']);
+  });
+
+  /**
+   * The reference lives on the record, so reading it after the delete finds
+   * nothing and the provider is never told. That ordering is the entire bug,
+   * and it is invisible from outside: the cookie clears either way.
+   */
+  it('reads the reference before deleting the record', async () => {
+    const ended: string[] = [];
+    sessions = createSessionManager({
+      store,
+      appName: 'inventory',
+      endIdentitySession: async (reference) => {
+        ended.push(reference);
+      },
+    });
+
+    const started = await sessions.start(signedIn({ sessionId: 'still-findable' }));
+    await sessions.end(asRequestCookie(started.cookie));
+
+    expect(ended).toEqual(['still-findable']);
+    expect(store.size).toBe(0);
+  });
+
+  /**
+   * This browser's session is already gone by then. Reporting failure would
+   * leave the page believing it is still signed in when it is not.
+   */
+  it('still signs out when the provider cannot be told', async () => {
+    sessions = createSessionManager({
+      store,
+      appName: 'inventory',
+      endIdentitySession: async () => {
+        throw new Error('unreachable');
+      },
+    });
+
+    const started = await sessions.start(signedIn());
+    const { cookie } = await sessions.end(asRequestCookie(started.cookie));
+
+    expect(cookie).toContain('Max-Age=0');
+    expect(store.size).toBe(0);
+  });
+
+  /** A session that never had a reference has nothing to tell the provider. */
+  it('says nothing when the session carries no reference', async () => {
+    let called = false;
+    sessions = createSessionManager({
+      store,
+      appName: 'inventory',
+      endIdentitySession: async () => {
+        called = true;
+      },
+    });
+
+    const started = await sessions.start(signedIn({ sessionId: undefined }));
+    await sessions.end(asRequestCookie(started.cookie));
+
+    expect(called).toBe(false);
+  });
 });
 
 describe('CSRF and Origin (§8.4)', () => {

@@ -40,6 +40,20 @@ export interface SessionManagerOptions {
     /** Defaults to five minutes, which §3.5 makes the ceiling. */
     intervalMs?: number;
   };
+
+  /**
+   * §8.6's other half: ending the IDENTITY session when somebody signs out.
+   *
+   * Optional, and its absence is a real gap rather than a taste. Without it
+   * `end()` clears this application's session and nothing else — the identity
+   * session survives, the next authorization request finds it and the saved
+   * grant, and issues a code with no interaction. The person signs out, signs
+   * in, and is returned to the session they just left.
+   *
+   * Never throws. By the time it runs the application's own session is gone,
+   * so a failure must not be reported as a failed sign-out.
+   */
+  endIdentitySession?(reference: string): Promise<unknown>;
 }
 
 /**
@@ -282,9 +296,33 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
     async end(cookieHeader): Promise<{ cookie: string }> {
       const identifier = readCookie(cookieHeader, name);
       if (identifier) {
+        const idHash = hashSessionIdentifier(identifier);
+
+        /**
+         * READ BEFORE DELETING (§8.6).
+         *
+         * The reference to the identity session lives on the record, so once
+         * the record is gone there is nothing left to name it by — and the
+         * provider is never told. Every consumer that wrote its own sign-out
+         * made this mistake in the same order.
+         */
+        const record = options.endIdentitySession ? await store.find(idHash) : null;
+
         // Not conditional on the record existing: deleting an absent session
         // is a no-op, and the cookie must be cleared either way.
-        await store.delete(hashSessionIdentifier(identifier));
+        await store.delete(idHash);
+
+        if (options.endIdentitySession && record?.identitySessionId) {
+          /**
+           * Swallowed, deliberately. This browser's session is already gone;
+           * reporting failure would leave the page believing it is still
+           * signed in when it is not. An unreachable provider means the
+           * identity session outlives the sign-out until its own timers end
+           * it — which is the same place a session with no reference was
+           * always going to be.
+           */
+          await options.endIdentitySession(record.identitySessionId).catch(() => {});
+        }
       }
       return { cookie: clearedSessionCookie(cookieOptions) };
     },

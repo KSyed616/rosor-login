@@ -83,6 +83,23 @@ export interface RosorLoginConfig {
   sessionReferenceUrl?: string;
 
   /**
+   * The provider's `/internal/session-end`, on `rosor_internal` (§8.6).
+   *
+   * WITHOUT IT, SIGN-OUT DOES NOT SIGN ANYBODY OUT. `end()` clears this
+   * application's session and, with this set, tells the provider to end the
+   * identity session behind it. Leave it unset and the identity session
+   * survives: the next authorization request finds it, finds the saved grant,
+   * and issues a code with no interaction — so the person is returned to the
+   * session they just left.
+   *
+   * A sibling of the OIDC mount, like the two above, and deliberately NOT
+   * derived from `sessionCheckUrl`. Building one URL by editing another works
+   * until a deployment mounts things differently, and then POSTs a sign-out
+   * somewhere unexpected.
+   */
+  sessionEndUrl?: string;
+
+  /**
    * Seconds of tolerance for clock skew when checking `exp` and `iat`.
    * Deliberately small: these are 5-minute tokens (§3.4), and a generous
    * tolerance on a short-lived token is most of its lifetime.
@@ -92,11 +109,15 @@ export interface RosorLoginConfig {
 
 export interface ResolvedConfig
   extends Required<
-    Omit<RosorLoginConfig, 'internalIssuer' | 'sessionCheckUrl' | 'sessionReferenceUrl'>
+    Omit<
+      RosorLoginConfig,
+      'internalIssuer' | 'sessionCheckUrl' | 'sessionReferenceUrl' | 'sessionEndUrl'
+    >
   > {
   internalIssuer: string;
   sessionCheckUrl?: string;
   sessionReferenceUrl?: string;
+  sessionEndUrl?: string;
 }
 
 export class RosorLoginConfigError extends Error {
@@ -150,12 +171,14 @@ export function resolveConfig(config: RosorLoginConfig): ResolvedConfig {
   if (config.sessionCheckUrl) requireAbsoluteUrl('sessionCheckUrl', config.sessionCheckUrl);
   if (config.sessionReferenceUrl)
     requireAbsoluteUrl('sessionReferenceUrl', config.sessionReferenceUrl);
+  if (config.sessionEndUrl) requireAbsoluteUrl('sessionEndUrl', config.sessionEndUrl);
 
   return {
     issuer,
     internalIssuer,
     sessionCheckUrl: config.sessionCheckUrl?.replace(/\/+$/, ''),
     sessionReferenceUrl: config.sessionReferenceUrl?.replace(/\/+$/, ''),
+    sessionEndUrl: config.sessionEndUrl?.replace(/\/+$/, ''),
     clientId: config.clientId,
     clientSecret: config.clientSecret,
     redirectUri: config.redirectUri,
